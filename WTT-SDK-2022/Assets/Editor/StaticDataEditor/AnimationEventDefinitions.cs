@@ -23,7 +23,7 @@ internal static class AnimationEventDefinitions
         "ShellEject", "WeapIn", "WeapOut", "OnBackpackDrop"
     };
 
-    /// <summary>Function names that carry an extra <c>AnimationEventParameter</c> payload.</summary>
+    /// <summary>Function names that carry an extra AnimationEventParameter payload.</summary>
     public static readonly HashSet<string> FunctionsWithParameters = new HashSet<string>
     {
         "Sound", "ThirdAction", "UseProp"

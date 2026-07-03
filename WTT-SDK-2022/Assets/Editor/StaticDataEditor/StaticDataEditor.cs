@@ -6,14 +6,13 @@ using UnityEngine;
 
 /// <summary>
 /// Editor window for authoring animation events + conditions on an
-/// <see cref="AnimatorControllerStaticData"/> asset, with a live clip preview and a
-/// draggable timeline (in the spirit of Unreal's AnimMontage editor) instead of raw
+/// <see cref="AnimatorControllerStaticData"/> asset, with a live preview and a
+/// draggable timeline event (in the spirit of Unreal's AnimMontage editor) instead of raw
 /// index fields.
 ///
 /// Workflow:
 ///  1. Assign the Static Data asset and pick an Events Collection Index to work on.
-///  2. Optionally assign a sound Container prefab (a WeaponSoundPlayer) so "Sound"
-///     events can actually be heard during preview playback.
+///     Can additionally assign container prefab to directly use sound from AdditionalSound
 ///  3. Configure a function/parameters/conditions in the inspector fields, then
 ///     "Add To Timeline" to stage it as a box on the track. Drag boxes to reposition
 ///     them in time; click one to re-select and edit it.
@@ -131,7 +130,7 @@ public class StaticDataEditor : EditorWindow
     }
 
     // ---------------------------------------------------------------
-    // Sound container (item 1 & 2)
+    // Sound container
     // ---------------------------------------------------------------
 
     private void DrawSoundContainerSection()
@@ -228,7 +227,7 @@ public class StaticDataEditor : EditorWindow
 
     /// <summary>
     /// Draws the notify-track-style timeline: a horizontal strip with a draggable box
-    /// per staged event, a red playhead, and 10% ruler ticks (item 3 & 4).
+    /// per staged event, a red playhead, and 10% ruler ticks.
     /// </summary>
     private void DrawTimeline(StagedEventCollection staged)
     {
@@ -399,32 +398,40 @@ public class StaticDataEditor : EditorWindow
     private void DrawAnimationEventParameterFields(string functionName)
     {
         EditorGUILayout.LabelField("Animation Event Parameter", EditorStyles.boldLabel);
-        paramBool = EditorGUILayout.Toggle("Bool Param", paramBool);
-        paramFloat = EditorGUILayout.FloatField("Float Param", paramFloat);
-        paramInt = EditorGUILayout.IntField("Int Param", paramInt);
 
-        if (functionName == "Sound")
+        switch (AnimationEventDefinitions.FunctionNames[selectedFunctionIndex])
         {
-            useContainerSound = EditorGUILayout.Toggle("Use Container Sound", useContainerSound);
-
-            if (useContainerSound)
-            {
-                DrawContainerSoundDropdown();
-            }
-            else
-            {
-                paramString = EditorGUILayout.TextField("String Param", paramString);
-            }
+            case "Sound":
+                useContainerSound = EditorGUILayout.Toggle("Use Container Sound", useContainerSound);
+                if (useContainerSound)
+                {
+                    DrawContainerSoundDropdown();
+                }
+                else
+                {
+                    paramString = EditorGUILayout.TextField("String Param", paramString);
+                }
+                paramType = EditorGUILayout.Popup("Param Type", paramType, AnimationEventDefinitions.ParamTypeNames);
+                paramType = 3;
+                break;
+            case "ThirdAction":
+                paramInt = EditorGUILayout.IntField("Int Param", paramInt);
+                paramType = EditorGUILayout.Popup("Param Type", paramType, AnimationEventDefinitions.ParamTypeNames);
+                paramType = 1;
+                break;
+            case "UseProp":
+                paramBool = EditorGUILayout.Toggle("Bool Param", paramBool);
+                paramType = EditorGUILayout.Popup("Param Type", paramType, AnimationEventDefinitions.ParamTypeNames);
+                paramType = 4;
+                break;
+            default:
+                paramType = EditorGUILayout.Popup("Param Type", paramType, AnimationEventDefinitions.ParamTypeNames);
+                paramType = 0;
+                break;
         }
-        else
-        {
-            paramString = EditorGUILayout.TextField("String Param", paramString);
-        }
-
-        paramType = EditorGUILayout.Popup("Param Type", paramType, AnimationEventDefinitions.ParamTypeNames);
     }
 
-    /// <summary>Lets the user pick a sound by EventName instead of typing it, sourced from the Container (item 1).</summary>
+    /// <summary>Lets the user pick a sound by EventName instead of typing it, sourced from the Container.</summary>
     private void DrawContainerSoundDropdown()
     {
         if (_soundLibrary.Count == 0)
@@ -586,7 +593,7 @@ public class StaticDataEditor : EditorWindow
     }
 
     // ---------------------------------------------------------------
-    // Animation clip preview + sound triggering (item 4 & 5)
+    // Animation clip preview + sound triggering
     // ---------------------------------------------------------------
 
     private void DrawAnimationPreviewSection()
@@ -649,8 +656,7 @@ public class StaticDataEditor : EditorWindow
                 _preview.Play(animationClip, userPreviewObject);
             }
         }
-
-        // The timeline slider stays exactly as before: a 0-1 float driving both the
+        
         // preview scrub position and (via the timeline above) where staged events sit.
         float newProgress = EditorGUILayout.Slider("Progress", _preview.AnimationTime / animationClip.length, 0f, 1f);
         float newAnimationTime = newProgress * animationClip.length;
