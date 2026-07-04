@@ -20,7 +20,7 @@ internal static class AnimationEventDefinitions
         "DelAmmoChamber", "DelAmmoFromMag", "Disarm", "FireEnd", "FiringBullet", "FoldOff", "FoldOn",
         "IdleStart", "LauncherAppeared", "LauncherDisappeared", "MagHide", "MagIn", "MagOut", "MagShow",
         "MalfunctionOff", "ModChanged", "OffBoltCatch", "OnBoltCatch", "RemoveShell", "StartUtilityOperation",
-        "ShellEject", "WeapIn", "WeapOut", "OnBackpackDrop"
+        "ShellEject", "WeapIn", "WeapOut", "OnBackpackDrop", "BipodOpen", "BipodClose"
     };
 
     /// <summary>Function names that carry an extra AnimationEventParameter payload.</summary>
