@@ -71,6 +71,12 @@ public class StaticDataEditor : EditorWindow
     private AnimationClip[] _prefabAnimationClips = new AnimationClip[0];
     private string _animationPrefabWarning;
     private int _prefabClipDropdownIndex;
+    
+    //Notification stuff;
+    private string helpMessage;
+    private MessageType helpType;
+    private double hideTime ;
+    private bool showNotif;
 
     [MenuItem("Custom Windows/Static Data Editor")]
     public static void ShowWindow()
@@ -105,6 +111,7 @@ public class StaticDataEditor : EditorWindow
                 if (GUILayout.Button("Fill Event", GUILayout.Width(80)))
                 {
                     RefreshEvent();
+                    RefillEvent();
                 }
             }
         }
@@ -157,6 +164,7 @@ public class StaticDataEditor : EditorWindow
                 if (GUILayout.Button("Refresh Container", GUILayout.Width(130)))
                 {
                     RefreshSoundLibrary();
+                    RefreshContainer();
                 }
             }
         }
@@ -232,6 +240,19 @@ public class StaticDataEditor : EditorWindow
                 EditorUtility.SetDirty(staticData);
                 AssetDatabase.SaveAssets();
                 _accessor.RunOnValidate(staticData);
+                FinalizeTimeline();
+            }
+            if (showNotif)
+            {
+                EditorGUILayout.HelpBox(helpMessage, helpType);
+                if (EditorApplication.timeSinceStartup >= hideTime)
+                {
+                    showNotif = false;
+                }
+                else
+                {
+                    Repaint();
+                }
             }
         }
     }
@@ -388,6 +409,7 @@ public class StaticDataEditor : EditorWindow
                     : 0f;
                 staged.Events.Add(newEvent);
                 _selectedStagedIndex = staged.Events.Count - 1;
+                AddEvent();
             }
 
             using (new EditorGUI.DisabledScope(!hasSelection))
@@ -395,12 +417,14 @@ public class StaticDataEditor : EditorWindow
                 if (GUILayout.Button("Update Selected"))
                 {
                     ApplyFieldsToStaged(staged.Events[_selectedStagedIndex]);
+                    UpdateEvent();
                 }
 
                 if (GUILayout.Button("Remove Selected"))
                 {
                     staged.Events.RemoveAt(_selectedStagedIndex);
                     _selectedStagedIndex = -1;
+                    RemoveEvent();
                 }
             }
         }
@@ -808,5 +832,44 @@ public class StaticDataEditor : EditorWindow
             _prefabClipDropdownIndex = newIndex;
         }
         animationClip = _prefabAnimationClips[_prefabClipDropdownIndex];
+    }
+
+    private void ShowNotif(string message, MessageType type, double time)
+    {
+        helpMessage = message;
+        helpType = type;
+        hideTime  = EditorApplication.timeSinceStartup + time;
+        showNotif = true;
+        Repaint();
+    }
+
+    private void RefreshContainer()
+    {
+        ShowNotif("Container has been Refreshed!", MessageType.Info, 2.5);
+    }
+
+    private void RefillEvent()
+    {
+        ShowNotif("Event Timeline has been refreshed from the static data!", MessageType.Info, 2.5);
+    }
+
+    private void UpdateEvent()
+    {
+        ShowNotif("Selected Event has been updated!", MessageType.Info, 2.5);
+    }
+
+    private void RemoveEvent()
+    {
+        ShowNotif("Selected Event has been removed!", MessageType.Warning, 2.5);
+    }
+
+    private void FinalizeTimeline()
+    {
+        ShowNotif("Timeline Event has been added to the static data!", MessageType.Info, 2.5);
+    }
+
+    private void AddEvent()
+    {
+        ShowNotif("Added Event to Staged Timeline!", MessageType.Info, 2.5);
     }
 }
