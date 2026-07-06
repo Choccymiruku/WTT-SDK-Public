@@ -96,8 +96,19 @@ public class StaticDataEditor : EditorWindow
     private void OnGUI()
     {
         GUILayout.Label("Static Data Editor", EditorStyles.boldLabel);
-        staticData = (AnimatorControllerStaticData)EditorGUILayout.ObjectField("Static Data", staticData, typeof(AnimatorControllerStaticData), false);
 
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            staticData = (AnimatorControllerStaticData)EditorGUILayout.ObjectField("Static Data", staticData, typeof(AnimatorControllerStaticData), false);
+            using (new EditorGUI.DisabledScope(staticData == null))
+            {
+                if (GUILayout.Button("Fill Event", GUILayout.Width(80)))
+                {
+                    RefreshEvent();
+                }
+            }
+        }
+        
         if (staticData != _lastStaticData)
         {
             _lastStaticData = staticData;
@@ -758,6 +769,22 @@ public class StaticDataEditor : EditorWindow
 
         GameObject source = PrefabUtility.GetCorrespondingObjectFromSource(go);
         return source != null ? AssetDatabase.GetAssetPath(source) : null;
+    }
+
+    private void RefreshEvent()
+    {
+        List<EventsCollection> eventsCollections = _accessor.GetEventsCollections(staticData);
+        if (!staticData || eventsCollections == null)
+        {
+            return;
+        }
+ 
+        EnsureListSize(eventsCollections, eventsCollectionIndex + 1, CreateEmptyEventsCollection);
+        EventsCollection eventsCollection = eventsCollections[eventsCollectionIndex];
+ 
+        _stagedCollections[eventsCollectionIndex] = StagedEventCollection.LoadFrom(eventsCollection, _accessor, animationClip);
+        _selectedStagedIndex = -1;
+        _draggingStagedIndex = -1;
     }
 
     private void DrawPrefabAnimationDropdown()
