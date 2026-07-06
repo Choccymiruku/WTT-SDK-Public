@@ -36,6 +36,14 @@ internal sealed class StagedAnimationEvent
     public string StringParam = string.Empty;
     public int ParamTypeIndex;
 
+    /// <summary>
+    /// 0 (top) to 1 (bottom) vertical position within the timeline track. Purely a
+    /// staging/editor arrangement aid so overlapping-in-time events can be dragged
+    /// apart visually - it has no equivalent in the real data model and is never
+    /// written to the asset.
+    /// </summary>
+    public float LaneOffset = 0.5f;
+
     public readonly List<StagedCondition> Conditions = new List<StagedCondition>();
 }
 
@@ -48,6 +56,9 @@ internal sealed class StagedAnimationEvent
 /// </summary>
 internal sealed class StagedEventCollection
 {
+    /// <summary>Cycled through when loading pre-existing events, so they start out spread across a few rows instead of stacked.</summary>
+    private static readonly float[] DefaultLaneOffsets = { 0.2f, 0.5f, 0.8f, 0.35f, 0.65f };
+
     public readonly List<StagedAnimationEvent> Events = new List<StagedAnimationEvent>();
     public int NextCreationOrder;
 
@@ -71,7 +82,8 @@ internal sealed class StagedEventCollection
             {
                 CreationOrder = staged.NextCreationOrder++,
                 FunctionName = accessor.GetFunctionName(evt) ?? AnimationEventDefinitions.FunctionNames[0],
-                NormalizedTime = accessor.GetEventTime(evt)
+                NormalizedTime = accessor.GetEventTime(evt),
+                LaneOffset = DefaultLaneOffsets[staged.Events.Count % DefaultLaneOffsets.Length]
             };
 
             if (evt.Parameter != null)

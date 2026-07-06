@@ -2,17 +2,19 @@ using System;
 using System.Collections.Generic;
 using AnimationEventSystem;
 using UnityEditor;
+using UnityEditor.IMGUI.Controls;
 using UnityEngine;
 
 /// <summary>
 /// Editor window for authoring animation events + conditions on an
-/// <see cref="AnimatorControllerStaticData"/> asset, with a live preview and a
-/// draggable timeline event (in the spirit of Unreal's AnimMontage editor) instead of raw
+/// <see cref="AnimatorControllerStaticData"/> asset, with a live clip preview and a
+/// draggable timeline (in the spirit of Unreal's AnimMontage editor) instead of raw
 /// index fields.
 ///
 /// Workflow:
 ///  1. Assign the Static Data asset and pick an Events Collection Index to work on.
-///     Can additionally assign container prefab to directly use sound from AdditionalSound
+///  2. Optionally assign a sound Container prefab (a WeaponSoundPlayer) so "Sound"
+///     events can actually be heard during preview playback.
 ///  3. Configure a function/parameters/conditions in the inspector fields, then
 ///     "Add To Timeline" to stage it as a box on the track. Drag boxes to reposition
 ///     them in time; click one to re-select and edit it.
@@ -36,6 +38,11 @@ public class StaticDataEditor : EditorWindow
     private readonly Dictionary<int, StagedEventCollection> _stagedCollections = new Dictionary<int, StagedEventCollection>();
     private int _selectedStagedIndex = -1;
     private int _draggingStagedIndex = -1;
+    private float _timelineZoom = 1f;
+    private float _timelineHeight = 90f;
+    private Vector2 _timelineScrollPos;
+    private bool _resizingTimelineHeight;
+    private bool _isPanningTimeline;
 
     // Animation event parameter fields (mirrors AnimationEventParameter)
     private bool paramBool;
@@ -263,15 +270,28 @@ public class StaticDataEditor : EditorWindow
     /// </summary>
     private void DrawTimeline(StagedEventCollection staged)
     {
-        GUILayout.Label("Timeline", EditorStyles.boldLabel);
-        Rect trackRect = EditorGUILayout.GetControlRect(GUILayout.Height(70));
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUILayout.Label("Timeline", EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("Zoom", GUILayout.Width(36));
+            _timelineZoom = GUILayout.HorizontalSlider(_timelineZoom, 1f, 10f, GUILayout.Width(120));
+        }
+
+        // The visible (viewport) area is fixed to the user-chosen height; the content
+        // inside can be much wider than that when zoomed in, so it scrolls horizontally.
+        Rect viewportRect = EditorGUILayout.GetControlRect(GUILayout.Height(_timelineHeight));
+        EditorGUIUtility.AddCursorRect(viewportRect, MouseCursor.Pan);
+        HandleTimelineZoomAndPan(viewportRect);
+
+        float contentWidth = viewportRect.width * _timelineZoom;
+        var contentRect = new Rect(0, 0, contentWidth, _timelineHeight);
+
+        _timelineScrollPos = GUI.BeginScrollView(viewportRect, _timelineScrollPos, contentRect, true, false);
+        Rect trackRect = contentRect;
         EditorGUI.DrawRect(trackRect, new Color(0.15f, 0.15f, 0.15f));
 
-        for (int i = 0; i <= 10; i++)
-        {
-            float x = trackRect.x + trackRect.width * (i / 10f);
-            EditorGUI.DrawRect(new Rect(x, trackRect.y, 1, trackRect.height), new Color(1f, 1f, 1f, 0.08f));
-        }
+        DrawTimelineRuler(trackRect);
 
         if (animationClip != null && animationClip.length > 0f)
         {
@@ -279,6 +299,98 @@ public class StaticDataEditor : EditorWindow
             EditorGUI.DrawRect(new Rect(playheadX - 1, trackRect.y, 2, trackRect.height), Color.red);
         }
 
+        DrawTimelineBoxes(staged, trackRect);
+
+        GUI.EndScrollView();
+
+        DrawTimelineResizeHandle(viewportRect);
+    }
+
+    /// <summary>
+    /// Scroll wheel while hovering the timeline zooms in/out (keeping the point under the
+    /// cursor stationary, the same way most timeline/DCC tools behave); holding down the
+    /// middle mouse button and dragging pans the view, Blender-viewport-style.
+    /// </summary>
+    private void HandleTimelineZoomAndPan(Rect viewportRect)
+    {
+        Event e = Event.current;
+        bool hovering = viewportRect.Contains(e.mousePosition);
+
+        if (hovering && e.type == EventType.ScrollWheel)
+        {
+            ApplyTimelineZoom(viewportRect, e);
+            return;
+        }
+
+        if (hovering && e.type == EventType.MouseDown && e.button == 2)
+        {
+            _isPanningTimeline = true;
+            e.Use();
+            return;
+        }
+
+        if (_isPanningTimeline && e.type == EventType.MouseDrag)
+        {
+            _timelineScrollPos.x -= e.delta.x;
+            e.Use();
+            Repaint();
+            return;
+        }
+
+        if (_isPanningTimeline && e.type == EventType.MouseUp)
+        {
+            _isPanningTimeline = false;
+            e.Use();
+        }
+    }
+
+    private void ApplyTimelineZoom(Rect viewportRect, Event e)
+    {
+        float oldZoom = _timelineZoom;
+        float newZoom = Mathf.Clamp(oldZoom - e.delta.y * 0.15f, 1f, 10f);
+
+        if (!Mathf.Approximately(newZoom, oldZoom))
+        {
+            float oldContentWidth = viewportRect.width * oldZoom;
+            float mouseContentX = (e.mousePosition.x - viewportRect.x) + _timelineScrollPos.x;
+            float fraction = oldContentWidth > 0f ? mouseContentX / oldContentWidth : 0f;
+
+            _timelineZoom = newZoom;
+            float newContentWidth = viewportRect.width * newZoom;
+            _timelineScrollPos.x = fraction * newContentWidth - (e.mousePosition.x - viewportRect.x);
+        }
+
+        e.Use();
+        Repaint();
+    }
+
+    /// <summary>Ruler ticks every 10%, each labeled with elapsed seconds and the equivalent frame number.</summary>
+    private void DrawTimelineRuler(Rect trackRect)
+    {
+        var rulerLabelStyle = new GUIStyle(EditorStyles.miniLabel) { fontSize = 9 };
+        rulerLabelStyle.normal.textColor = new Color(1f, 1f, 1f, 0.6f);
+
+        bool haveClipInfo = animationClip != null && animationClip.length > 0f;
+        float frameRate = haveClipInfo ? animationClip.frameRate : 0f;
+
+        for (int i = 0; i <= 10; i++)
+        {
+            float normalizedT = i / 10f;
+            float x = trackRect.x + trackRect.width * normalizedT;
+            EditorGUI.DrawRect(new Rect(x, trackRect.y, 1, trackRect.height), new Color(1f, 1f, 1f, 0.08f));
+
+            if (haveClipInfo)
+            {
+                float seconds = normalizedT * animationClip.length;
+                int frame = Mathf.RoundToInt(seconds * frameRate);
+                string label = $"{seconds:0.00}s | f{frame}";
+                GUI.Label(new Rect(x + 2, trackRect.y + 1, 90, 14), label, rulerLabelStyle);
+            }
+        }
+    }
+
+    private void DrawTimelineBoxes(StagedEventCollection staged, Rect trackRect)
+    {
         int[] displayIndices = staged.ComputeDisplayIndices();
         const float collapsedSize = 18f;
         const float expandedWidth = 100f;
@@ -287,21 +399,29 @@ public class StaticDataEditor : EditorWindow
 
         var centeredNumberStyle = new GUIStyle(EditorStyles.whiteBoldLabel) { alignment = TextAnchor.MiddleCenter, fontSize = 9 };
 
+        // Pass 1: figure out each box's state and rect, and handle input, without drawing
+        // yet. Drawing is deferred so the expanded (hovered/dragged) box can be rendered
+        // last, on top of its neighbors, regardless of its position in the list.
+        var boxes = new List<(Rect rect, Color color, bool expanded, string caption)>(staged.Events.Count);
+
+        // A little headroom at the very top/bottom so lane 0 and lane 1 never clip
+        // against the ruler labels or the track edge.
+        float laneTop = trackRect.y + 20f;
+        float laneBottom = trackRect.yMax - collapsedSize;
+        float laneHeight = Mathf.Max(1f, laneBottom - laneTop);
+
         for (int i = 0; i < staged.Events.Count; i++)
         {
             StagedAnimationEvent evt = staged.Events[i];
             // The LEFT EDGE of the box is the actual trigger point - this is what the
             // playhead is compared against, and what gets written as the event's time.
-            // Anchoring on the left edge (rather than centering the box on it) means an
-            // event dragged all the way to the start or end of the track lands on an
-            // exact 0.0 or 1.0, instead of being off by half the box's width.
             float anchorX = trackRect.x + trackRect.width * evt.NormalizedTime;
-            float centerY = trackRect.y + trackRect.height / 2f;
+            float anchorY = laneTop + laneHeight * evt.LaneOffset;
 
             // Hover/click always target this fixed small zone at the event's anchor point,
             // regardless of whether the box is currently drawn collapsed or expanded -
             // otherwise the hit target would jump around as the box grows/shrinks.
-            var hitRect = new Rect(anchorX, centerY - collapsedSize / 2f, collapsedSize, collapsedSize);
+            var hitRect = new Rect(anchorX, anchorY - collapsedSize / 2f, collapsedSize, collapsedSize);
 
             bool isSelected = i == _selectedStagedIndex;
             bool isDragging = i == _draggingStagedIndex;
@@ -309,7 +429,7 @@ public class StaticDataEditor : EditorWindow
             bool isExpanded = isHovered || isDragging;
 
             Rect boxRect = isExpanded
-                ? new Rect(anchorX, centerY - expandedHeight / 2f, expandedWidth, expandedHeight)
+                ? new Rect(anchorX, anchorY - expandedHeight / 2f, expandedWidth, expandedHeight)
                 : hitRect;
 
             Color boxColor = evt.FunctionName == "Sound" ? new Color(0.25f, 0.55f, 0.85f) : new Color(0.35f, 0.35f, 0.35f);
@@ -322,24 +442,15 @@ public class StaticDataEditor : EditorWindow
                 boxColor = Color.Lerp(boxColor, Color.white, 0.15f);
             }
 
-            // A thin marker at the exact anchor point, so the trigger position stays
-            // visible even when the box (which extends to the right of it) gets clipped
-            // by the edge of the track near time 1.0.
-            EditorGUI.DrawRect(new Rect(anchorX - 1, trackRect.y, 2, trackRect.height), new Color(1f, 1f, 1f, 0.4f));
+            // A thin marker spanning the full track height at the exact anchor time, so
+            // the trigger position stays visible regardless of which lane the box is on.
+            EditorGUI.DrawRect(new Rect(anchorX - 1, trackRect.y, 2, trackRect.height), new Color(1f, 1f, 1f, 0.25f));
 
-            EditorGUI.DrawRect(boxRect, boxColor);
-            GUI.Box(boxRect, GUIContent.none);
+            string caption = isExpanded
+                ? $"[{displayIndices[i]}] #{evt.CreationOrder}\n{(evt.FunctionName == "Sound" ? evt.StringParam : evt.FunctionName)}"
+                : evt.CreationOrder.ToString();
 
-            if (isExpanded)
-            {
-                string label = evt.FunctionName == "Sound" ? evt.StringParam : evt.FunctionName;
-                string caption = $"[{displayIndices[i]}] #{evt.CreationOrder}\n{label}";
-                GUI.Label(boxRect, caption, EditorStyles.whiteMiniLabel);
-            }
-            else
-            {
-                GUI.Label(boxRect, evt.CreationOrder.ToString(), centeredNumberStyle);
-            }
+            boxes.Add((boxRect, boxColor, isExpanded, caption));
 
             if (e.type == EventType.MouseDown && hitRect.Contains(e.mousePosition))
             {
@@ -351,12 +462,30 @@ public class StaticDataEditor : EditorWindow
             }
         }
 
+        // Pass 2: draw collapsed boxes first, then expanded ones on top of everything else.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool drawingExpandedPass = pass == 1;
+            foreach (var box in boxes)
+            {
+                if (box.expanded != drawingExpandedPass)
+                {
+                    continue;
+                }
+
+                EditorGUI.DrawRect(box.rect, box.color);
+                GUI.Box(box.rect, GUIContent.none);
+                GUI.Label(box.rect, box.caption, box.expanded ? EditorStyles.whiteMiniLabel : centeredNumberStyle);
+            }
+        }
+
         if (_draggingStagedIndex >= 0 && _draggingStagedIndex < staged.Events.Count)
         {
             if (e.type == EventType.MouseDrag)
             {
-                float t = Mathf.Clamp01((e.mousePosition.x - trackRect.x) / trackRect.width);
-                staged.Events[_draggingStagedIndex].NormalizedTime = t;
+                StagedAnimationEvent dragged = staged.Events[_draggingStagedIndex];
+                dragged.NormalizedTime = Mathf.Clamp01((e.mousePosition.x - trackRect.x) / trackRect.width);
+                dragged.LaneOffset = Mathf.Clamp01((e.mousePosition.y - laneTop) / laneHeight);
                 e.Use();
                 Repaint();
             }
@@ -376,12 +505,48 @@ public class StaticDataEditor : EditorWindow
         }
     }
 
+    /// <summary>A small drag handle beneath the timeline so the user can resize its height directly.</summary>
+    private void DrawTimelineResizeHandle(Rect viewportRect)
+    {
+        var handleRect = new Rect(viewportRect.x, viewportRect.yMax, viewportRect.width, 6f);
+        EditorGUI.DrawRect(handleRect, new Color(1f, 1f, 1f, 0.12f));
+        EditorGUIUtility.AddCursorRect(handleRect, MouseCursor.ResizeVertical);
+
+        Event e = Event.current;
+        if (e.type == EventType.MouseDown && handleRect.Contains(e.mousePosition))
+        {
+            _resizingTimelineHeight = true;
+            e.Use();
+        }
+        else if (_resizingTimelineHeight && e.type == EventType.MouseDrag)
+        {
+            _timelineHeight = Mathf.Clamp(_timelineHeight + e.delta.y, 60f, 500f);
+            e.Use();
+            Repaint();
+        }
+        else if (_resizingTimelineHeight && e.type == EventType.MouseUp)
+        {
+            _resizingTimelineHeight = false;
+            e.Use();
+        }
+
+        GUILayout.Space(8);
+    }
+
     private void DrawEventInspector(StagedEventCollection staged)
     {
         bool hasSelection = _selectedStagedIndex >= 0 && _selectedStagedIndex < staged.Events.Count;
         GUILayout.Label(hasSelection ? $"Editing Event #{staged.Events[_selectedStagedIndex].CreationOrder}" : "New Event", EditorStyles.boldLabel);
 
-        selectedFunctionIndex = EditorGUILayout.Popup("Function Name", selectedFunctionIndex, AnimationEventDefinitions.FunctionNames);
+        //selectedFunctionIndex = EditorGUILayout.Popup("Function Name", selectedFunctionIndex, AnimationEventDefinitions.FunctionNames);
+        
+        //selectedFunctionIndex = Mathf.Clamp(_prefabClipDropdownIndex, 0, clipNames.Length - 1);
+        string[] funcName = AnimationEventDefinitions.FunctionNames;
+        DrawSearchableDropdownField("Function Name", funcName, selectedFunctionIndex, selected =>
+        {
+            selectedFunctionIndex = selected;
+        });
+        
         string functionName = AnimationEventDefinitions.FunctionNames[selectedFunctionIndex];
         bool hasParameter = AnimationEventDefinitions.FunctionsWithParameters.Contains(functionName);
 
@@ -477,8 +642,33 @@ public class StaticDataEditor : EditorWindow
 
         string[] names = GetStrippedSoundNames();
         soundEventDropdownIndex = Mathf.Clamp(soundEventDropdownIndex, 0, names.Length - 1);
-        soundEventDropdownIndex = EditorGUILayout.Popup("Sound Event", soundEventDropdownIndex, names);
-        paramString = names[soundEventDropdownIndex];
+
+        DrawSearchableDropdownField("Sound Event", names, soundEventDropdownIndex, selected =>
+        {
+            soundEventDropdownIndex = selected;
+            paramString = names[selected];
+        });
+    }
+
+    /// <summary>
+    /// A dropdown-style field backed by <see cref="SearchableStringDropdown"/> instead of
+    /// a plain Popup, so long option lists (FBX animation lists, sound-event lists) can
+    /// be filtered by typing rather than scrolled through.
+    /// </summary>
+    private static void DrawSearchableDropdownField(string label, string[] options, int currentIndex, Action<int> onSelected)
+    {
+        Rect lineRect = EditorGUILayout.GetControlRect();
+        Rect labelRect = new Rect(lineRect.x, lineRect.y, EditorGUIUtility.labelWidth, lineRect.height);
+        Rect fieldRect = new Rect(lineRect.x + EditorGUIUtility.labelWidth, lineRect.y, lineRect.width - EditorGUIUtility.labelWidth, lineRect.height);
+
+        EditorGUI.LabelField(labelRect, label);
+
+        string currentLabel = options.Length > 0 && currentIndex >= 0 && currentIndex < options.Length ? options[currentIndex] : "-";
+        if (EditorGUI.DropdownButton(fieldRect, new GUIContent(currentLabel), FocusType.Keyboard))
+        {
+            var dropdown = new SearchableStringDropdown(label, options, onSelected);
+            dropdown.Show(fieldRect);
+        }
     }
 
     /// <summary>Sound library EventNames with the "Snd" prefix removed, matching how String Param stores them.</summary>
@@ -497,7 +687,12 @@ public class StaticDataEditor : EditorWindow
     {
         condType = EditorGUILayout.Popup("Condition Type", condType, AnimationEventDefinitions.ConditionTypeNames);
         string[] names = AnimationEventDefinitions.ConditionNamesForTypeIndex(condType);
-        conditionNameEnum = EditorGUILayout.Popup("Name", conditionNameEnum, names);
+        //conditionNameEnum = EditorGUILayout.Popup("Name", conditionNameEnum, names);
+        
+        DrawSearchableDropdownField("Prefab Animation", names, conditionNameEnum, selected =>
+        {
+            conditionNameEnum = selected;
+        });
 
         switch (condType)
         {
@@ -612,6 +807,32 @@ public class StaticDataEditor : EditorWindow
         return staged;
     }
 
+    /// <summary>
+    /// Re-reads the current Events Collection Index straight from the static data asset,
+    /// discarding whatever is currently staged for it - used by the "Get Event" button
+    /// to pull in changes made outside this window (or to undo unsaved timeline edits).
+    /// </summary>
+    private void ReloadStagedFromStaticData()
+    {
+        if (staticData == null)
+        {
+            return;
+        }
+
+        List<EventsCollection> eventsCollections = _accessor.GetEventsCollections(staticData);
+        if (eventsCollections == null)
+        {
+            return;
+        }
+
+        EnsureListSize(eventsCollections, eventsCollectionIndex + 1, CreateEmptyEventsCollection);
+        EventsCollection eventsCollection = eventsCollections[eventsCollectionIndex];
+
+        _stagedCollections[eventsCollectionIndex] = StagedEventCollection.LoadFrom(eventsCollection, _accessor, animationClip);
+        _selectedStagedIndex = -1;
+        _draggingStagedIndex = -1;
+    }
+
     private EventsCollection CreateEmptyEventsCollection()
     {
         var collection = new EventsCollection();
@@ -691,7 +912,8 @@ public class StaticDataEditor : EditorWindow
                 _preview.Play(animationClip, userPreviewObject);
             }
         }
-        
+
+        // The timeline slider stays exactly as before: a 0-1 float driving both the
         // preview scrub position and (via the timeline above) where staged events sit.
         float newProgress = EditorGUILayout.Slider("Progress", _preview.AnimationTime / animationClip.length, 0f, 1f);
         float newAnimationTime = newProgress * animationClip.length;
@@ -826,12 +1048,18 @@ public class StaticDataEditor : EditorWindow
         }
 
         _prefabClipDropdownIndex = Mathf.Clamp(_prefabClipDropdownIndex, 0, clipNames.Length - 1);
-        int newIndex = EditorGUILayout.Popup("Prefab Animation", _prefabClipDropdownIndex, clipNames);
+        DrawSearchableDropdownField("Prefab Animation", clipNames, _prefabClipDropdownIndex, selected =>
+        {
+            _prefabClipDropdownIndex = selected;
+            animationClip = _prefabAnimationClips[selected];
+        });
+        
+        /*int newIndex = EditorGUILayout.Popup("Prefab Animation", _prefabClipDropdownIndex, clipNames);
         if (newIndex != _prefabClipDropdownIndex)
         {
             _prefabClipDropdownIndex = newIndex;
         }
-        animationClip = _prefabAnimationClips[_prefabClipDropdownIndex];
+        animationClip = _prefabAnimationClips[_prefabClipDropdownIndex];*/
     }
 
     private void ShowNotif(string message, MessageType type, double time)
