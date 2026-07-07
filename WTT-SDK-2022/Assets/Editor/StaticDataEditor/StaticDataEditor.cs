@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using AnimationEventSystem;
+using JetBrains.Annotations;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
 using UnityEngine;
@@ -43,6 +44,8 @@ public class StaticDataEditor : EditorWindow
     private Vector2 _timelineScrollPos;
     private bool _resizingTimelineHeight;
     private bool _isPanningTimeline;
+    private bool hideSoundEvents;
+    private int hideEventAmount;
 
     // Animation event parameter fields (mirrors AnimationEventParameter)
     private bool paramBool;
@@ -112,10 +115,17 @@ public class StaticDataEditor : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            staticData = (AnimatorControllerStaticData)EditorGUILayout.ObjectField("Static Data", staticData, typeof(AnimatorControllerStaticData), false);
+            staticData = (AnimatorControllerStaticData)EditorGUILayout.ObjectField(new GUIContent(
+                "Static Data",
+                "The static data that is being used" +
+                " by the animator controller for Animation Events."), 
+                staticData, typeof(AnimatorControllerStaticData), false);
             using (new EditorGUI.DisabledScope(staticData == null))
             {
-                if (GUILayout.Button("Fill Event", GUILayout.Width(80)))
+                if (GUILayout.Button(new GUIContent(
+                        "Fill Event",
+                        "Grab the event from the current selected index" +
+                        " of the static data"), GUILayout.Width(80)))
                 {
                     RefreshEvent();
                     RefillEvent();
@@ -130,7 +140,13 @@ public class StaticDataEditor : EditorWindow
             _selectedStagedIndex = -1;
         }
 
-        eventsCollectionIndex = Mathf.Max(0, EditorGUILayout.IntField("Events Collection Index", eventsCollectionIndex));
+        eventsCollectionIndex = Mathf.Max(0, EditorGUILayout.IntField(new GUIContent(
+            "Events Collection Index",
+            "Select the index you want to modify." +
+            " MUST BE IN INTEGER. This is an array, the number" +
+            " you put in is the element that is being access/modified." +
+            " The total Event collection will be " +
+            " always +1 of your highest element number."), eventsCollectionIndex));
         if (eventsCollectionIndex != _lastEventsCollectionIndex)
         {
             _lastEventsCollectionIndex = eventsCollectionIndex;
@@ -164,13 +180,20 @@ public class StaticDataEditor : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            soundContainer = (GameObject)EditorGUILayout.ObjectField("Container", soundContainer, typeof(GameObject), false);
+            soundContainer = (GameObject)EditorGUILayout.ObjectField(new GUIContent(
+                "Container",
+                "Insert the weapon container prefab" +
+                " that stores the WeaponSoundPlayer"), soundContainer, typeof(GameObject), false);
 
             using (new EditorGUI.DisabledScope(soundContainer == null))
             {
-                if (GUILayout.Button("Refresh Container", GUILayout.Width(130)))
+                if (GUILayout.Button(new GUIContent(
+                        "Refresh",
+                        "Refresh both the sound library" +
+                        " and animation prefab that is inserted"), GUILayout.Width(80)))
                 {
                     RefreshSoundLibrary();
+                    RefreshPrefabAnimationClips();
                     RefreshContainer();
                 }
             }
@@ -241,7 +264,11 @@ public class StaticDataEditor : EditorWindow
         GUILayout.Space(10);
         using (new EditorGUI.DisabledScope(staged.Events.Count == 0))
         {
-            if (GUILayout.Button("Finalize Event Collection", GUILayout.Height(28)))
+            if (GUILayout.Button(new GUIContent(
+                    "Finalize Event Timeline",
+                    "Copy All the staged Event within the timeline" +
+                    " and save them into the current Event Collection index" +
+                    " of the static data."), GUILayout.Height(28)))
             {
                 staged.WriteTo(eventsCollection, _accessor);
                 EditorUtility.SetDirty(staticData);
@@ -249,45 +276,50 @@ public class StaticDataEditor : EditorWindow
                 _accessor.RunOnValidate(staticData);
                 FinalizeTimeline();
             }
-            if (showNotif)
-            {
-                EditorGUILayout.HelpBox(helpMessage, helpType);
-                if (EditorApplication.timeSinceStartup >= hideTime)
-                {
-                    showNotif = false;
-                }
-                else
-                {
-                    Repaint();
-                }
-            }
         }
     }
 
     /// <summary>
-    /// Draws the notify-track-style timeline: a horizontal strip with a draggable box
-    /// per staged event, a red playhead, and 10% ruler ticks.
+    /// Draws the notify-track-style timeline: a horizontal, zoomable/scrollable strip
+    /// with a draggable (both axes) box per staged event, a red playhead, ruler ticks
+    /// labeled with seconds and frame number, and a user-resizable height.
     /// </summary>
     private void DrawTimeline(StagedEventCollection staged)
     {
         using (new EditorGUILayout.HorizontalScope())
         {
-            GUILayout.Label("Timeline", EditorStyles.boldLabel);
+            GUILayout.Label(new GUIContent(
+                "Timeline",
+                "Timeline for displaying the Animation Event that exist within the current static data index." +
+                " Mouse Scroll wheel to zoom. Middle Mouse to drag (Think of it as blender middle mouse)." +
+                " Dragable Event object for retiming. Hold Left Mouse on the red Playhead to move the Position" +
+                " where the event will be placed."), EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             GUILayout.Label("Zoom", GUILayout.Width(36));
             _timelineZoom = GUILayout.HorizontalSlider(_timelineZoom, 1f, 10f, GUILayout.Width(120));
         }
+        hideSoundEvents = EditorGUILayout.Toggle(new GUIContent(
+            "Hide Sound Event",
+            "Hide the Event that is only playing sound"), hideSoundEvents, GUILayout.Width(60));
+        hideEventAmount = Mathf.Max(0, EditorGUILayout.IntField(new GUIContent(
+            "Hide Event Amount",
+            "How many events there are to be hidden. " +
+            "Based on creation order, 10 means event numbered " +
+            "0-9 will be hidden"), hideEventAmount, GUILayout.Width(220)));
 
         // The visible (viewport) area is fixed to the user-chosen height; the content
-        // inside can be much wider than that when zoomed in, so it scrolls horizontally.
+        // inside is wider when zoomed in (scrolls horizontally) and taller than the
+        // viewport by design (scrolls vertically), so there's always somewhere for a
+        // middle-mouse-button pan to actually go, and lanes have more room to spread out.
         Rect viewportRect = EditorGUILayout.GetControlRect(GUILayout.Height(_timelineHeight));
         EditorGUIUtility.AddCursorRect(viewportRect, MouseCursor.Pan);
         HandleTimelineZoomAndPan(viewportRect);
 
         float contentWidth = viewportRect.width * _timelineZoom;
-        var contentRect = new Rect(0, 0, contentWidth, _timelineHeight);
+        float contentHeight = _timelineHeight * 1.5f;
+        var contentRect = new Rect(0, 0, contentWidth, contentHeight);
 
-        _timelineScrollPos = GUI.BeginScrollView(viewportRect, _timelineScrollPos, contentRect, true, false);
+        _timelineScrollPos = GUI.BeginScrollView(viewportRect, _timelineScrollPos, contentRect, true, true);
         Rect trackRect = contentRect;
         EditorGUI.DrawRect(trackRect, new Color(0.15f, 0.15f, 0.15f));
 
@@ -296,6 +328,10 @@ public class StaticDataEditor : EditorWindow
         if (animationClip != null && animationClip.length > 0f)
         {
             float playheadX = trackRect.x + trackRect.width * Mathf.Clamp01(_preview.AnimationTime / animationClip.length);
+            var playheadHitRect = new Rect(playheadX - 4, trackRect.y, 8, trackRect.height);
+            HandlePlayheadDrag(playheadHitRect, trackRect);
+
+            playheadX = trackRect.x + trackRect.width * Mathf.Clamp01(_preview.AnimationTime / animationClip.length);
             EditorGUI.DrawRect(new Rect(playheadX - 1, trackRect.y, 2, trackRect.height), Color.red);
         }
 
@@ -304,6 +340,46 @@ public class StaticDataEditor : EditorWindow
         GUI.EndScrollView();
 
         DrawTimelineResizeHandle(viewportRect);
+    }
+
+    /// <summary>
+    /// Lets the red playhead line itself be dragged to scrub, same as the Progress
+    /// slider - both read/write the same <see cref="AnimationPreviewController.AnimationTime"/>,
+    /// so moving one immediately updates the other on the next repaint.
+    /// </summary>
+    private void HandlePlayheadDrag(Rect playheadHitRect, Rect trackRect)
+    {
+        int controlId = GUIUtility.GetControlID(FocusType.Passive);
+        Event e = Event.current;
+
+        switch (e.GetTypeForControl(controlId))
+        {
+            case EventType.MouseDown:
+                if (!_preview.IsPlaying && playheadHitRect.Contains(e.mousePosition))
+                {
+                    GUIUtility.hotControl = controlId;
+                    e.Use();
+                }
+                break;
+
+            case EventType.MouseDrag:
+                if (GUIUtility.hotControl == controlId)
+                {
+                    float t = Mathf.Clamp01((e.mousePosition.x - trackRect.x) / trackRect.width);
+                    _preview.Scrub(t * animationClip.length);
+                    e.Use();
+                    Repaint();
+                }
+                break;
+
+            case EventType.MouseUp:
+                if (GUIUtility.hotControl == controlId)
+                {
+                    GUIUtility.hotControl = 0;
+                    e.Use();
+                }
+                break;
+        }
     }
 
     /// <summary>
@@ -332,6 +408,7 @@ public class StaticDataEditor : EditorWindow
         if (_isPanningTimeline && e.type == EventType.MouseDrag)
         {
             _timelineScrollPos.x -= e.delta.x;
+            _timelineScrollPos.y -= e.delta.y;
             e.Use();
             Repaint();
             return;
@@ -413,6 +490,16 @@ public class StaticDataEditor : EditorWindow
         for (int i = 0; i < staged.Events.Count; i++)
         {
             StagedAnimationEvent evt = staged.Events[i];
+
+            // Fully hidden events skip rendering, hit-testing, and the anchor-time marker
+            // line entirely - they're just not part of the timeline while hidden.
+            bool hiddenBySoundToggle = hideSoundEvents && evt.FunctionName == "Sound";
+            bool hiddenByAmount = evt.CreationOrder < hideEventAmount;
+            if (hiddenBySoundToggle || hiddenByAmount)
+            {
+                continue;
+            }
+
             // The LEFT EDGE of the box is the actual trigger point - this is what the
             // playhead is compared against, and what gets written as the event's time.
             float anchorX = trackRect.x + trackRect.width * evt.NormalizedTime;
@@ -545,7 +632,7 @@ public class StaticDataEditor : EditorWindow
         DrawSearchableDropdownField("Function Name", funcName, selectedFunctionIndex, selected =>
         {
             selectedFunctionIndex = selected;
-        });
+        }, true, "List of Function names that is triggered during the event by the client");
         
         string functionName = AnimationEventDefinitions.FunctionNames[selectedFunctionIndex];
         bool hasParameter = AnimationEventDefinitions.FunctionsWithParameters.Contains(functionName);
@@ -555,18 +642,34 @@ public class StaticDataEditor : EditorWindow
             DrawAnimationEventParameterFields(functionName);
         }
 
-        GUILayout.Label("Conditions", EditorStyles.boldLabel);
-        eventConditionIndex = Mathf.Max(0, EditorGUILayout.IntField("Condition Index", eventConditionIndex));
-        showEventConditions = EditorGUILayout.Toggle("Show Event Conditions", showEventConditions);
+        showEventConditions = EditorGUILayout.Toggle(new GUIContent(
+            "Show Event Conditions",
+            "Toggle whether to use conditional check or not." +
+            " Conditional check act the same as Animation State Condition." +
+            " This essentially will check if a condition is met or not," +
+            " if a condition is met, the event will be played, if not" +
+            " the event will be skipped."), showEventConditions);
+        
+        
         if (showEventConditions)
         {
+            GUILayout.Label("Conditions", EditorStyles.boldLabel);
+            eventConditionIndex = Mathf.Max(0, EditorGUILayout.IntField(new GUIContent(
+                    "Condition Index",
+                    "Works similarly with Event Collection index." +
+                    " Add a Conditional element to the Animation Event." +
+                    " Show Event Conditions must be checked for it to be added."), 
+                eventConditionIndex));
             DrawConditionFields();
         }
 
         GUILayout.Space(4);
         using (new EditorGUILayout.HorizontalScope())
         {
-            if (GUILayout.Button("Add To Timeline"))
+            if (GUILayout.Button(new GUIContent(
+                    "Add Event",
+                    "Add the Animation Event Information" +
+                    " That is selected into the Timeline.")))
             {
                 StagedAnimationEvent newEvent = BuildStagedEventFromFields(staged.NextCreationOrder++);
                 newEvent.NormalizedTime = animationClip != null && animationClip.length > 0f
@@ -579,13 +682,19 @@ public class StaticDataEditor : EditorWindow
 
             using (new EditorGUI.DisabledScope(!hasSelection))
             {
-                if (GUILayout.Button("Update Selected"))
+                if (GUILayout.Button(new GUIContent(
+                        "Update Event",
+                        "Update the selected Animation Event" +
+                        " from the timeline")))
                 {
                     ApplyFieldsToStaged(staged.Events[_selectedStagedIndex]);
                     UpdateEvent();
                 }
 
-                if (GUILayout.Button("Remove Selected"))
+                if (GUILayout.Button(new GUIContent(
+                        "Remove Event",
+                        "Remove the selected event" +
+                        " from the timeline")))
                 {
                     staged.Events.RemoveAt(_selectedStagedIndex);
                     _selectedStagedIndex = -1;
@@ -602,7 +711,12 @@ public class StaticDataEditor : EditorWindow
         switch (AnimationEventDefinitions.FunctionNames[selectedFunctionIndex])
         {
             case "Sound":
-                useContainerSound = EditorGUILayout.Toggle("Use Container Sound", useContainerSound);
+                useContainerSound = EditorGUILayout.Toggle(new GUIContent(
+                    "Use Container Sound",
+                    "Instead of manually typing the Event name," +
+                    " checking this box enables user to select" +
+                    " Sound Event Name straight from the container prefab." +
+                    " Requires Weapon Container prefab to be inserted"), useContainerSound);
                 if (useContainerSound)
                 {
                     DrawContainerSoundDropdown();
@@ -647,7 +761,8 @@ public class StaticDataEditor : EditorWindow
         {
             soundEventDropdownIndex = selected;
             paramString = names[selected];
-        });
+        }, true, "Automatically grabs Event Name from the Weapon Container AdditionalSounds and remove the \"Snd\" prefix" +
+                 " when Finalizing Event Timeline");
     }
 
     /// <summary>
@@ -655,7 +770,7 @@ public class StaticDataEditor : EditorWindow
     /// a plain Popup, so long option lists (FBX animation lists, sound-event lists) can
     /// be filtered by typing rather than scrolled through.
     /// </summary>
-    private static void DrawSearchableDropdownField(string label, string[] options, int currentIndex, Action<int> onSelected)
+    private static void DrawSearchableDropdownField(string label, string[] options, int currentIndex, Action<int> onSelected, bool isTooltip, [CanBeNull] string description)
     {
         Rect lineRect = EditorGUILayout.GetControlRect();
         Rect labelRect = new Rect(lineRect.x, lineRect.y, EditorGUIUtility.labelWidth, lineRect.height);
@@ -664,10 +779,22 @@ public class StaticDataEditor : EditorWindow
         EditorGUI.LabelField(labelRect, label);
 
         string currentLabel = options.Length > 0 && currentIndex >= 0 && currentIndex < options.Length ? options[currentIndex] : "-";
-        if (EditorGUI.DropdownButton(fieldRect, new GUIContent(currentLabel), FocusType.Keyboard))
+
+        if (isTooltip)
         {
-            var dropdown = new SearchableStringDropdown(label, options, onSelected);
-            dropdown.Show(fieldRect);
+            if (EditorGUI.DropdownButton(fieldRect, new GUIContent(currentLabel, description), FocusType.Keyboard))
+            {
+                var dropdown = new SearchableStringDropdown(label, options, onSelected);
+                dropdown.Show(fieldRect);
+            }
+        }
+        else
+        {
+            if (EditorGUI.DropdownButton(fieldRect, new GUIContent(currentLabel), FocusType.Keyboard))
+            {
+                var dropdown = new SearchableStringDropdown(label, options, onSelected);
+                dropdown.Show(fieldRect);
+            }
         }
     }
 
@@ -689,10 +816,11 @@ public class StaticDataEditor : EditorWindow
         string[] names = AnimationEventDefinitions.ConditionNamesForTypeIndex(condType);
         //conditionNameEnum = EditorGUILayout.Popup("Name", conditionNameEnum, names);
         
-        DrawSearchableDropdownField("Prefab Animation", names, conditionNameEnum, selected =>
+        DrawSearchableDropdownField("Name", names, conditionNameEnum, selected =>
         {
             conditionNameEnum = selected;
-        });
+        }, true, "Names for the conditions, will be different depending on Condition Type chosen." +
+                 " This is essentially the same as the animation state blending condition");
 
         switch (condType)
         {
@@ -863,7 +991,15 @@ public class StaticDataEditor : EditorWindow
 
         using (new EditorGUI.DisabledScope(clipLocked))
         {
-            AnimationClip newClip = (AnimationClip)EditorGUILayout.ObjectField("Animation Clip", animationClip, typeof(AnimationClip), false);
+            AnimationClip newClip = (AnimationClip)EditorGUILayout.ObjectField(
+                new GUIContent(
+                    "Animation Clip",
+                    "Single Animation clip used" +
+                    " to preview animation for inputting Animation Event" +
+                    " timing."), 
+                animationClip, 
+                typeof(AnimationClip), 
+                false);
             if (!clipLocked)
             {
                 animationClip = newClip;
@@ -872,7 +1008,13 @@ public class StaticDataEditor : EditorWindow
 
         using (new EditorGUI.DisabledScope(prefabLocked))
         {
-            animationPrefab = (GameObject)EditorGUILayout.ObjectField("Animation Prefab", animationPrefab, typeof(GameObject), false);
+            animationPrefab = (GameObject)EditorGUILayout.ObjectField(new GUIContent(
+                "Animation Prefab",
+                "This refers to the imported FBX that contains the animation." +
+                " An alternative to the singular Animation clip options." +
+                " Loads all the imported animation from the FBX prefab" +
+                " and lets user choose through the prefab animation" +
+                " dropdown menu."), animationPrefab, typeof(GameObject), false);
         }
 
         if (animationPrefab != _lastAnimationPrefab)
@@ -893,7 +1035,9 @@ public class StaticDataEditor : EditorWindow
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Preview Object", EditorStyles.boldLabel);
-        userPreviewObject = (GameObject)EditorGUILayout.ObjectField("User Preview Object", userPreviewObject, typeof(GameObject), false);
+        userPreviewObject = (GameObject)EditorGUILayout.ObjectField(new GUIContent(
+            "User Preview Prefab",
+            "Prefab for previewing the animation"), userPreviewObject, typeof(GameObject), false);
 
         if (animationClip == null)
         {
@@ -939,6 +1083,19 @@ public class StaticDataEditor : EditorWindow
 
             Repaint();
         }
+        if (showNotif)
+        {
+            EditorGUILayout.HelpBox(helpMessage, helpType);
+            if (EditorApplication.timeSinceStartup >= hideTime)
+            {
+                showNotif = false;
+            }
+            else
+            {
+                Repaint();
+            }
+        }
+        
     }
 
     /// <summary>
@@ -1052,7 +1209,7 @@ public class StaticDataEditor : EditorWindow
         {
             _prefabClipDropdownIndex = selected;
             animationClip = _prefabAnimationClips[selected];
-        });
+        }, false, null);
         
         /*int newIndex = EditorGUILayout.Popup("Prefab Animation", _prefabClipDropdownIndex, clipNames);
         if (newIndex != _prefabClipDropdownIndex)
@@ -1073,31 +1230,37 @@ public class StaticDataEditor : EditorWindow
 
     private void RefreshContainer()
     {
-        ShowNotif("Container has been Refreshed!", MessageType.Info, 2.5);
+        ShowNotif("Container and Animation Prefab has been Refreshed!", MessageType.Info, 2.5);
+        Debug.Log("Container and Animation Prefab has been Refreshed!");
     }
 
     private void RefillEvent()
     {
         ShowNotif("Event Timeline has been refreshed from the static data!", MessageType.Info, 2.5);
+        Debug.Log("Event Timeline has been refreshed from the static data!");
     }
 
     private void UpdateEvent()
     {
         ShowNotif("Selected Event has been updated!", MessageType.Info, 2.5);
+        Debug.Log("Selected Event has been updated!");
     }
 
     private void RemoveEvent()
     {
         ShowNotif("Selected Event has been removed!", MessageType.Warning, 2.5);
+        Debug.LogWarning("Removed Selected Event");
     }
 
     private void FinalizeTimeline()
     {
         ShowNotif("Timeline Event has been added to the static data!", MessageType.Info, 2.5);
+        Debug.Log("Timeline Event has been added to the static data!");
     }
 
     private void AddEvent()
     {
         ShowNotif("Added Event to Staged Timeline!", MessageType.Info, 2.5);
+        Debug.Log("Added Event to Staged Timeline!");
     }
 }

@@ -124,10 +124,16 @@ internal sealed class AnimationPreviewController : IDisposable
         _graph.Evaluate();
     }
 
-    /// <summary>Jumps to a specific time, e.g. when the user drags the progress slider while stopped.</summary>
+    /// <summary>Jumps to a specific time, e.g. when the user drags the progress slider or timeline playhead.</summary>
     public void Scrub(float time)
     {
         AnimationTime = time;
+
+        if (!_playable.IsValid())
+        {
+            return;
+        }
+
         _playable.SetTime(AnimationTime);
         _graph.Evaluate();
     }
