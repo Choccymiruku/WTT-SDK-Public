@@ -129,6 +129,7 @@ public class StaticDataEditor : EditorWindow
                 {
                     RefreshEvent();
                     RefillEvent();
+                    AudioNotification.PlayClick();
                 }
             }
         }
@@ -195,6 +196,7 @@ public class StaticDataEditor : EditorWindow
                     RefreshSoundLibrary();
                     RefreshPrefabAnimationClips();
                     RefreshContainer();
+                    AudioNotification.PlayRefresh();
                 }
             }
         }
@@ -275,6 +277,7 @@ public class StaticDataEditor : EditorWindow
                 AssetDatabase.SaveAssets();
                 _accessor.RunOnValidate(staticData);
                 FinalizeTimeline();
+                AudioNotification.PlayFinalize();
             }
         }
     }
@@ -678,6 +681,7 @@ public class StaticDataEditor : EditorWindow
                 staged.Events.Add(newEvent);
                 _selectedStagedIndex = staged.Events.Count - 1;
                 AddEvent();
+                AudioNotification.PlayClick();
             }
 
             using (new EditorGUI.DisabledScope(!hasSelection))
@@ -689,6 +693,7 @@ public class StaticDataEditor : EditorWindow
                 {
                     ApplyFieldsToStaged(staged.Events[_selectedStagedIndex]);
                     UpdateEvent();
+                    AudioNotification.PlayClick();
                 }
 
                 if (GUILayout.Button(new GUIContent(
@@ -699,6 +704,7 @@ public class StaticDataEditor : EditorWindow
                     staged.Events.RemoveAt(_selectedStagedIndex);
                     _selectedStagedIndex = -1;
                     RemoveEvent();
+                    AudioNotification.PlayRemove();
                 }
             }
         }
