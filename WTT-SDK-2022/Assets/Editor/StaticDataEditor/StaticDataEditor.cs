@@ -1216,57 +1216,35 @@ public class StaticDataEditor : EditorWindow
             _prefabClipDropdownIndex = selected;
             animationClip = _prefabAnimationClips[selected];
         }, false, null);
-        
-        /*int newIndex = EditorGUILayout.Popup("Prefab Animation", _prefabClipDropdownIndex, clipNames);
-        if (newIndex != _prefabClipDropdownIndex)
-        {
-            _prefabClipDropdownIndex = newIndex;
-        }
-        animationClip = _prefabAnimationClips[_prefabClipDropdownIndex];*/
-    }
-
-    private void ShowNotif(string message, MessageType type, double time)
-    {
-        helpMessage = message;
-        helpType = type;
-        hideTime  = EditorApplication.timeSinceStartup + time;
-        showNotif = true;
-        Repaint();
     }
 
     private void RefreshContainer()
     {
-        ShowNotif("Container and Animation Prefab has been Refreshed!", MessageType.Info, 2.5);
         Debug.Log("Container and Animation Prefab has been Refreshed!");
     }
 
     private void RefillEvent()
     {
-        ShowNotif("Event Timeline has been refreshed from the static data!", MessageType.Info, 2.5);
         Debug.Log("Event Timeline has been refreshed from the static data!");
     }
 
     private void UpdateEvent()
     {
-        ShowNotif("Selected Event has been updated!", MessageType.Info, 2.5);
         Debug.Log("Selected Event has been updated!");
     }
 
     private void RemoveEvent()
     {
-        ShowNotif("Selected Event has been removed!", MessageType.Warning, 2.5);
         Debug.LogWarning("Removed Selected Event");
     }
 
     private void FinalizeTimeline()
     {
-        ShowNotif("Timeline Event has been added to the static data!", MessageType.Info, 2.5);
         Debug.Log("Timeline Event has been added to the static data!");
     }
 
     private void AddEvent()
     {
-        ShowNotif("Added Event to Staged Timeline!", MessageType.Info, 2.5);
         Debug.Log("Added Event to Staged Timeline!");
     }
 }
