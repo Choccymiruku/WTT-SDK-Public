@@ -140,6 +140,12 @@ namespace AnimationEventSystem
                 case "OnBackpackDrop":
                     _functionNameHash = 224242560;                    
                     break;
+                case "BipodOpen":
+                    _functionNameHash = 1527071002;                    
+                    break;
+                case "BipodClose":
+                    _functionNameHash = -378724418;                    
+                    break;
                 default:
 					_functionNameHash = 0;
                     Enabled = true;
