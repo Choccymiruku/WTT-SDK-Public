@@ -22,6 +22,8 @@ internal sealed class AnimationPreviewController : IDisposable
     private float _distance = 5f;
     private Vector3 _pivot = Vector3.zero;
     private float _lastUpdateRealtime;
+    private AnimationClip _activeClip;
+    private GameObject _activePreviewPrefab;
 
     public bool IsPlaying { get; private set; }
     public float AnimationTime { get; private set; }
@@ -65,11 +67,67 @@ internal sealed class AnimationPreviewController : IDisposable
             return;
         }
 
-        if (_previewObject != null)
+        // Resuming (same clip + same preview prefab as last time, and the playable is
+        // still set up) picks up from the current AnimationTime instead of restarting -
+        // that covers both "unpaused after Stop()" and "pressed Play after scrubbing
+        // while stopped". Anything else (a different clip, a different preview prefab,
+        // or the very first Play() this session) is treated as a fresh start.
+        bool canResume = _playable.IsValid() && _previewObject != null
+                          && _activeClip == clip && _activePreviewPrefab == userPreviewPrefab;
+
+        if (!canResume)
         {
-            UnityEngine.Object.DestroyImmediate(_previewObject);
+            if (_previewObject != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_previewObject);
+                _previewObject = null;
+            }
+            CreatePreviewObject(userPreviewPrefab);
+
+            _playable = AnimationClipPlayable.Create(_graph, clip);
+            var animator = _previewObject.GetComponent<Animator>();
+            var output = AnimationPlayableOutput.Create(_graph, "Animation", animator);
+            output.SetSourcePlayable(_playable);
+
+            _activeClip = clip;
+            _activePreviewPrefab = userPreviewPrefab;
+            AnimationTime = 0f;
         }
 
+        // Make sure the graph reflects AnimationTime immediately - matters both for a
+        // fresh start (time just reset to 0) and for resuming after the user scrubbed
+        // to a new position while stopped.
+        _playable.SetTime(AnimationTime);
+        _graph.Play();
+
+        IsPlaying = true;
+        _lastUpdateRealtime = Time.realtimeSinceStartup;
+    }
+
+    /// <summary>
+    /// Makes sure a preview object exists without requiring Play() to have been called
+    /// yet - used so First Person mode can locate a Camera on the preview prefab even
+    /// before the user has pressed Play.
+    /// </summary>
+    public void EnsurePreviewObject(GameObject userPreviewPrefab)
+    {
+        if (_previewObject != null)
+        {
+            return;
+        }
+
+        CreatePreviewObject(userPreviewPrefab);
+    }
+
+    /// <summary>Finds a Camera on (or under) the currently instantiated preview object, if any.</summary>
+    public bool TryGetPreviewObjectCamera(out Camera camera)
+    {
+        camera = _previewObject != null ? _previewObject.GetComponentInChildren<Camera>(true) : null;
+        return camera != null;
+    }
+
+    private void CreatePreviewObject(GameObject userPreviewPrefab)
+    {
         if (userPreviewPrefab != null)
         {
             _previewObject = UnityEngine.Object.Instantiate(userPreviewPrefab);
@@ -85,16 +143,6 @@ internal sealed class AnimationPreviewController : IDisposable
             _previewObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
             _renderUtility.AddSingleGO(_previewObject);
         }
-
-        _playable = AnimationClipPlayable.Create(_graph, clip);
-        var animator = _previewObject.GetComponent<Animator>();
-        var output = AnimationPlayableOutput.Create(_graph, "Animation", animator);
-        output.SetSourcePlayable(_playable);
-        _graph.Play();
-
-        IsPlaying = true;
-        AnimationTime = 0f;
-        _lastUpdateRealtime = Time.realtimeSinceStartup;
     }
 
     public void Stop()
@@ -131,6 +179,11 @@ internal sealed class AnimationPreviewController : IDisposable
 
         if (!_playable.IsValid())
         {
+            // Play() hasn't been called yet this session, so there's no PlayableGraph
+            // node to scrub - AnimationTime is still updated above so the UI (playhead,
+            // Progress slider) stays correct. Without this guard, SetTime() below throws
+            // on the invalid handle, which aborts the caller before it can call
+            // e.Use()/Repaint() - that's what made a drag only "catch up" on mouse-up.
             return;
         }
 
@@ -138,21 +191,51 @@ internal sealed class AnimationPreviewController : IDisposable
         _graph.Evaluate();
     }
 
-    public void Render(Rect previewRect)
+    /// <summary>
+    /// Renders the preview. If <paramref name="firstPersonCamera"/> is provided, the
+    /// preview camera matches its position/rotation/field-of-view every frame instead
+    /// of the usual orbit/pan/zoom, and mouse-driven camera controls are skipped
+    /// entirely (locked) while it's active.
+    /// </summary>
+    public void Render(Rect previewRect, Camera firstPersonCamera = null)
     {
         _renderUtility.BeginPreview(previewRect, GUIStyle.none);
-        HandleCameraInput(previewRect);
+
+        if (firstPersonCamera == null)
+        {
+            HandleCameraInput(previewRect);
+        }
 
         var cam = _renderUtility.camera;
-        cam.nearClipPlane = 0.01f;
-        cam.farClipPlane = 1000f;
 
-        _previewLight.transform.position = cam.transform.position;
-        _previewLight.transform.LookAt(_pivot);
+        if (firstPersonCamera != null)
+        {
+            cam.nearClipPlane = firstPersonCamera.nearClipPlane;
+            cam.farClipPlane = firstPersonCamera.farClipPlane;
+            cam.fieldOfView = firstPersonCamera.fieldOfView;
 
-        Quaternion rotation = Quaternion.Euler(_orbit.y, _orbit.x, 0f);
-        Vector3 position = _pivot - rotation * Vector3.forward * _distance;
-        cam.transform.SetPositionAndRotation(position, rotation);
+            // The camera's own GameObject is rotated 90 degrees on its local X axis
+            // before being applied to the preview camera - post-multiplying keeps this
+            // relative to the camera's own local axes rather than the world's.
+            Quaternion correctedRotation = firstPersonCamera.transform.rotation * Quaternion.Euler(90f, 0f, 0f);
+            cam.transform.SetPositionAndRotation(firstPersonCamera.transform.position, correctedRotation);
+
+            _previewLight.transform.position = cam.transform.position;
+            _previewLight.transform.rotation = cam.transform.rotation;
+        }
+        else
+        {
+            cam.nearClipPlane = 0.01f;
+            cam.farClipPlane = 1000f;
+            cam.fieldOfView = 75;
+
+            _previewLight.transform.position = cam.transform.position;
+            _previewLight.transform.LookAt(_pivot);
+
+            Quaternion rotation = Quaternion.Euler(_orbit.y, _orbit.x, 0f);
+            Vector3 position = _pivot - rotation * Vector3.forward * _distance;
+            cam.transform.SetPositionAndRotation(position, rotation);
+        }
 
         _renderUtility.Render();
         _renderUtility.EndAndDrawPreview(previewRect);

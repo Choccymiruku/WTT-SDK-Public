@@ -28,6 +28,7 @@ public class StaticDataEditor : EditorWindow
     private readonly SoundContainerAccessor _soundAccessor = new SoundContainerAccessor();
     private readonly SoundEventPlayer _soundPlayer = new SoundEventPlayer();
     private AnimationPreviewController _preview;
+    private AnimationPreviewWindow _previewWindow;
 
     // Static data navigation
     private AnimatorControllerStaticData staticData;
@@ -46,6 +47,7 @@ public class StaticDataEditor : EditorWindow
     private bool _isPanningTimeline;
     private bool hideSoundEvents;
     private int hideEventAmount;
+    private bool disableSound;
 
     // Animation event parameter fields (mirrors AnimationEventParameter)
     private bool paramBool;
@@ -76,6 +78,7 @@ public class StaticDataEditor : EditorWindow
     // Preview inputs
     private AnimationClip animationClip;
     private GameObject userPreviewObject;
+    private bool firstPersonMode;
     private GameObject animationPrefab;
     private GameObject _lastAnimationPrefab;
     private AnimationClip[] _prefabAnimationClips = new AnimationClip[0];
@@ -107,6 +110,12 @@ public class StaticDataEditor : EditorWindow
     private void OnDisable()
     {
         _preview?.Dispose();
+
+        if (_previewWindow != null)
+        {
+            _previewWindow.Close();
+            _previewWindow = null;
+        }
     }
 
     private void OnGUI()
@@ -168,7 +177,47 @@ public class StaticDataEditor : EditorWindow
         }
 
         GUILayout.Space(10);
-        DrawAnimationPreviewSection();
+        if (_previewWindow != null)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.HelpBox("Animation Source / Preview is open in a separate window.", MessageType.Info);
+                if (GUILayout.Button("Reattach", GUILayout.Width(90)))
+                {
+                    DockPreviewWindow();
+                }
+            }
+        }
+        else
+        {
+            DrawAnimationPreviewSection();
+        }
+    }
+
+    private void PopOutPreviewWindow()
+    {
+        if (_previewWindow != null)
+        {
+            _previewWindow.Focus();
+            return;
+        }
+
+        _previewWindow = AnimationPreviewWindow.Open(this);
+    }
+
+    private void DockPreviewWindow()
+    {
+        if (_previewWindow != null)
+        {
+            _previewWindow.Close(); // triggers OnDestroy -> NotifyPreviewWindowClosed
+        }
+    }
+
+    /// <summary>Called by <see cref="AnimationPreviewWindow"/> when it's closed (by the user or programmatically).</summary>
+    internal void NotifyPreviewWindowClosed()
+    {
+        _previewWindow = null;
+        Repaint();
     }
 
     // ---------------------------------------------------------------
@@ -240,6 +289,46 @@ public class StaticDataEditor : EditorWindow
         _soundLibrary = entries;
     }
 
+    /// <summary>
+    /// True if this event is currently hidden on the timeline (either the "Hide Sound
+    /// Event" toggle, or it falls within the first N created events per "Hide Event
+    /// Amount"). Used both to skip drawing it and to temporarily disable it from
+    /// actually playing audio while hidden
+    /// </summary>
+    private bool IsEventHidden(StagedAnimationEvent evt)
+    {
+        bool hiddenBySoundToggle = hideSoundEvents && evt.FunctionName == "Sound";
+        bool hiddenByAmount = evt.CreationOrder < hideEventAmount;
+        return hiddenBySoundToggle && disableSound || hiddenByAmount && disableSound;
+    }
+
+    /// <summary>
+    /// Checks the current Events Collection for Sound events crossed between two
+    /// normalized-time points and plays them - used by both live playback (Tick) and,
+    /// when Scrub Audio is enabled, by scrubbing. Events currently hidden via "Hide
+    /// Sound Event" or "Hide Event Amount" are excluded here too: hiding an event
+    /// temporarily silences it exactly like it temporarily hides it, and "Hide Event
+    /// Amount" only mutes the specific events that amount actually hides (by creation
+    /// order), not every Sound event in the collection.
+    /// </summary>
+    private void TriggerSoundEventsBetween(float previousNormalizedTime, float currentNormalizedTime)
+    {
+        if (staticData == null || !_stagedCollections.TryGetValue(eventsCollectionIndex, out StagedEventCollection staged))
+        {
+            return;
+        }
+
+        var audibleEvents = new List<StagedAnimationEvent>(staged.Events.Count);
+        foreach (StagedAnimationEvent evt in staged.Events)
+        {
+            if (!IsEventHidden(evt))
+            {
+                audibleEvents.Add(evt);
+            }
+        }
+
+        _soundPlayer.CheckAndPlay(previousNormalizedTime, currentNormalizedTime, audibleEvents, _soundLibrary);
+    }
     // ---------------------------------------------------------------
     // Static data / timeline editing
     // ---------------------------------------------------------------
@@ -309,6 +398,9 @@ public class StaticDataEditor : EditorWindow
             "How many events there are to be hidden. " +
             "Based on creation order, 10 means event numbered " +
             "0-9 will be hidden"), hideEventAmount, GUILayout.Width(220)));
+        disableSound = EditorGUILayout.Toggle(new GUIContent("Mute Event", 
+            "Disable the sound event from playing" +
+            ". Needs you to at least toggle Hide Sound Event or use Hide Event Amount"), disableSound, GUILayout.Width(60));
 
         // The visible (viewport) area is fixed to the user-chosen height; the content
         // inside is wider when zoomed in (scrolls horizontally) and taller than the
@@ -627,10 +719,6 @@ public class StaticDataEditor : EditorWindow
     {
         bool hasSelection = _selectedStagedIndex >= 0 && _selectedStagedIndex < staged.Events.Count;
         GUILayout.Label(hasSelection ? $"Editing Event #{staged.Events[_selectedStagedIndex].CreationOrder}" : "New Event", EditorStyles.boldLabel);
-
-        //selectedFunctionIndex = EditorGUILayout.Popup("Function Name", selectedFunctionIndex, AnimationEventDefinitions.FunctionNames);
-        
-        //selectedFunctionIndex = Mathf.Clamp(_prefabClipDropdownIndex, 0, clipNames.Length - 1);
         string[] funcName = AnimationEventDefinitions.FunctionNames;
         DrawSearchableDropdownField("Function Name", funcName, selectedFunctionIndex, selected =>
         {
@@ -820,8 +908,6 @@ public class StaticDataEditor : EditorWindow
     {
         condType = EditorGUILayout.Popup("Condition Type", condType, AnimationEventDefinitions.ConditionTypeNames);
         string[] names = AnimationEventDefinitions.ConditionNamesForTypeIndex(condType);
-        //conditionNameEnum = EditorGUILayout.Popup("Name", conditionNameEnum, names);
-        
         DrawSearchableDropdownField("Name", names, conditionNameEnum, selected =>
         {
             conditionNameEnum = selected;
@@ -896,6 +982,10 @@ public class StaticDataEditor : EditorWindow
                     c.BoolValue = condBool; c.FloatValue = 0f; c.IntValue = 0; c.ModeIndex = 0;
                     break;
             }
+        }
+        else if (!showEventConditions)
+        {
+            s.Conditions.Clear();
         }
     }
 
@@ -986,9 +1076,22 @@ public class StaticDataEditor : EditorWindow
     // Animation clip preview + sound triggering
     // ---------------------------------------------------------------
 
-    private void DrawAnimationPreviewSection()
+    internal void DrawAnimationPreviewSection()
     {
-        EditorGUILayout.LabelField("Animation Source", EditorStyles.boldLabel);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.LabelField("Animation Source", EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+
+            // Only offer to pop out from the main window - the popped-out window itself
+            // doesn't need a way to pop out again.
+            if (_previewWindow == null && GUILayout.Button(new GUIContent("Detach", 
+                    "Detach animation preview " +
+                    "into a separate window"), GUILayout.Width(70)))
+            {
+                PopOutPreviewWindow();
+            }
+        }
 
         // Only one source can drive the clip at a time: a direct clip, or a prefab's
         // clip picked from a dropdown. Whichever one is already set locks the other.
@@ -1045,6 +1148,42 @@ public class StaticDataEditor : EditorWindow
             "User Preview Prefab",
             "Prefab for previewing the animation"), userPreviewObject, typeof(GameObject), false);
 
+        Camera firstPersonCamera = null;
+        if (userPreviewObject != null)
+        {
+            firstPersonMode = EditorGUILayout.ToggleLeft(new GUIContent(
+                "FP",
+                "First Person mode. Looks for a Camera component on the User Preview Prefab" +
+                " and, if found, switches the preview to look through it instead of the" +
+                " orbiting preview camera, and locks mouse-driven camera controls while active."),
+                firstPersonMode);
+
+            if (firstPersonMode)
+            {
+                // Doesn't require Play() to have been pressed yet - the preview object
+                // (and therefore any Camera on it) needs to exist to search it, so make
+                // sure one has been instantiated.
+                _preview.EnsurePreviewObject(userPreviewObject);
+
+                if (_preview.TryGetPreviewObjectCamera(out Camera foundCamera))
+                {
+                    firstPersonCamera = foundCamera;
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(
+                        $"No Camera component found on '{userPreviewObject.name}' or its children - cannot switch to first-person view.",
+                        MessageType.Error);
+                }
+            }
+        }
+        else if (firstPersonMode)
+        {
+            // The preview object was cleared while FP was still on - fall back cleanly
+            // rather than leaving a locked camera with nothing to look through.
+            firstPersonMode = false;
+        }
+
         if (animationClip == null)
         {
             EditorGUILayout.HelpBox("Please assign an Animation Clip or an Animation Prefab.", MessageType.Warning);
@@ -1072,9 +1211,9 @@ public class StaticDataEditor : EditorWindow
             _preview.Scrub(newAnimationTime);
             Repaint();
         }
-
+        
         Rect previewRect = GUILayoutUtility.GetRect(200, 200, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-        _preview.Render(previewRect);
+        _preview.Render(previewRect, firstPersonCamera);
 
         if (_preview.IsPlaying)
         {
@@ -1082,10 +1221,7 @@ public class StaticDataEditor : EditorWindow
             _preview.Tick(animationClip);
             float afterNormalized = _preview.AnimationTime / animationClip.length;
 
-            if (staticData != null && _stagedCollections.TryGetValue(eventsCollectionIndex, out StagedEventCollection staged))
-            {
-                _soundPlayer.CheckAndPlay(beforeNormalized, afterNormalized, staged.Events, _soundLibrary);
-            }
+            TriggerSoundEventsBetween(beforeNormalized, afterNormalized);
 
             Repaint();
         }

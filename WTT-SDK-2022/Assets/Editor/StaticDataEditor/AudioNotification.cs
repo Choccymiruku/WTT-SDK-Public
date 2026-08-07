@@ -35,10 +35,10 @@ public class AudioNotification
 
     private static void LoadAudioClips()
     {
-        playConfirm = LoadClip("Confirm");
-        finalizeEvent = LoadClip("Finalize");
-        removeEvent = LoadClip("Remove");
-        refreshPrefab = LoadClip("Refresh");
+        playConfirm = LoadClip("ConfirmEvent");
+        finalizeEvent = LoadClip("FinalizeEvent");
+        removeEvent = LoadClip("RemoveEvent");
+        refreshPrefab = LoadClip("RefreshEvent");
     }
 
     private static AudioClip LoadClip(string name)

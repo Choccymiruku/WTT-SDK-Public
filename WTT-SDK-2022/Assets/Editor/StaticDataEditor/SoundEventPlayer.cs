@@ -45,9 +45,17 @@ internal sealed class SoundEventPlayer
 
     private static bool DidCrossTime(float previous, float current, float eventTime)
     {
+        // Inclusive lower bound specifically at the start of playback (previous == 0):
+        // otherwise an event sitting at exactly time 0 never satisfies "eventTime >
+        // previous" on the very first tick after Play(), since both are 0, and so it
+        // would never fire. This only affects that first tick - previous moves past 0
+        // immediately afterward, so it can't cause repeated re-triggering.
+        bool includeLowerBound = previous <= 0f;
+
         if (current >= previous)
         {
-            return eventTime > previous && eventTime <= current;
+            bool passesLowerBound = includeLowerBound ? eventTime >= previous : eventTime > previous;
+            return passesLowerBound && eventTime <= current;
         }
 
         // Playback wrapped around (looped) between the previous and current frame.
