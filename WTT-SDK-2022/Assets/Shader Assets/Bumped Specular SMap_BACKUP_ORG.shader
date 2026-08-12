@@ -1,7 +1,6 @@
-Shader "p0/Reflective/Bumped Specular SMap" {
+Shader "p0/Reflective/Bumped Specular SMap_BACKUP_ORG" {
 	Properties {
 		[MaterialEnum(Static, 0, Characters, 1, Hands, 2)] _StencilType ("_StencilType", Float) = 0
-		[Toggle(USESCENELIGHT)] _SceneLight ("Change Lightning Behvaiour", Float) = 0
 		_Color ("Main Color", Color) = (1,1,1,1)
 		_BaseTintColor ("Tint Color", Color) = (1,1,1,1)
 		_SpecMap ("GlossMap", 2D) = "white" {}
@@ -36,8 +35,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
 		_HeatCenter ("_HeatCenter", Vector) = (0,0,0,1)
 		_HeatSize ("_HeatSize", Vector) = (0.02,0.04,0.02,1)
 		_HeatTemp ("_HeatTemp", Float) = 0
-		[Space(10)] [Toggle(VISUALIZEHEAT)] _VisualizeHeat ("Visualize Heat (blend Heat Color 1/2 gradient on surface)", Float) = 0
-		_HeatBlendStrength ("Visualize Heat Blend Strength", Range(0,1)) = 1
 	}
 	SubShader {
 		Tags { "RenderType" = "Opaque" }
@@ -90,12 +87,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
 			float3 _Temperature;
 			float _ThermalVisionOn;
 			float _HeatThermalFactor;
-			float _VisualizeHeat;
-			float _HeatBlendStrength;
-			float4 _HeatColor1;
-			float4 _HeatColor2;
-			float4 _HeatCenter;
-			float4 _HeatSize;
 			// Custom ConstantBuffers for Vertex Shader
 			// Custom ConstantBuffers for Fragment Shader
 			// Texture params for Vertex Shader
@@ -124,11 +115,9 @@ Shader "p0/Reflective/Bumped Specular SMap" {
                 o.position = unity_MatrixVP._m03_m13_m23_m33 * tmp1.wwww + tmp2;
                 o.texcoord.xy = v.texcoord.xy * _MainTex_ST.xy + _MainTex_ST.zw;
                 o.texcoord1.w = tmp0.x;
-				//Start Modified Line
                 tmp1.xyz = v.tangent.yyy * unity_ObjectToWorld._m11_m21_m01;
                 tmp1.xyz = unity_ObjectToWorld._m10_m20_m00 * v.tangent.xxx + tmp1.xyz;
                 tmp1.xyz = unity_ObjectToWorld._m12_m22_m02 * v.tangent.zzz + tmp1.xyz;
-				//End Modified Line
                 tmp0.x = dot(tmp1.xyz, tmp1.xyz);
                 tmp0.x = rsqrt(tmp0.x);
                 tmp1.xyz = tmp0.xxx * tmp1.xyz;
@@ -307,25 +296,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
                 tmp1.xyz = tmp1.yzw * tmp0.xxx + tmp4.xyz;
                 tmp0.xyz = tmp3.xzw * tmp0.yzw + tmp1.xyz;
                 o.sv_target.xyz = tmp2.xyz * tmp3.yyy + tmp0.xyz;
-                if (_VisualizeHeat > 0.5) {
-                    // Box-collider-style bounds: _HeatCenter/_HeatSize define a box in object
-                    // space (_HeatSize is a full extent, like BoxCollider.size). Per-axis distance
-                    // from center, normalized so 0 = center, 1 = wall. Chebyshev (max-of-axes) gives
-                    // a box-shaped gradient near the walls instead of a sphere. Past the wall the
-                    // blend strength itself fades out smoothly (see heatOutsideFade below) instead
-                    // of cutting off hard, so Color2 dissolves gently into the original texture.
-                    float3 heatAxisDist = abs(inp.texcoord5.xyz - _HeatCenter.xyz) / max(_HeatSize.xyz * 0.5, 0.0001);
-                    float heatBoxDist = max(heatAxisDist.x, max(heatAxisDist.y, heatAxisDist.z));
-                    float heatEdgeStart = 0.7;
-                    float heatColorT = saturate((heatBoxDist - heatEdgeStart) / max(1.0 - heatEdgeStart, 0.0001));
-                    float3 heatColor = lerp(_HeatColor1.rgb, _HeatColor2.rgb, heatColorT);
-                    // Past the wall (heatBoxDist > 1), keep using Color2 but fade the blend AMOUNT
-                    // itself down to 0 over heatOutsideFalloff units, so Color2 dissolves smoothly
-                    // into the original texture instead of stopping dead exactly at the box wall.
-                    float heatOutsideFalloff = 0.3;
-                    float heatOutsideFade = 1.0 - saturate((heatBoxDist - 1.0) / max(heatOutsideFalloff, 0.0001));
-                    o.sv_target.xyz = lerp(o.sv_target.xyz, heatColor, _HeatBlendStrength * heatOutsideFade);
-                }
                 o.sv_target.w = 0.0;
                 return o;
 			}
@@ -383,12 +353,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
 			float3 _Temperature;
 			float _ThermalVisionOn;
 			float _HeatThermalFactor;
-			float _VisualizeHeat;
-			float _HeatBlendStrength;
-			float4 _HeatColor1;
-			float4 _HeatColor2;
-			float4 _HeatCenter;
-			float4 _HeatSize;
 			// Custom ConstantBuffers for Vertex Shader
 			// Custom ConstantBuffers for Fragment Shader
 			// Texture params for Vertex Shader
@@ -554,25 +518,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
                 tmp2.xyz = tmp5.xyz * _SpecColor.xyz;
                 tmp0.xyz = tmp0.xxx * tmp2.xyz;
                 o.sv_target.xyz = tmp1.xyz * tmp0.www + tmp0.xyz;
-                if (_VisualizeHeat > 0.5) {
-                    // Box-collider-style bounds: _HeatCenter/_HeatSize define a box in object
-                    // space (_HeatSize is a full extent, like BoxCollider.size). Per-axis distance
-                    // from center, normalized so 0 = center, 1 = wall. Chebyshev (max-of-axes) gives
-                    // a box-shaped gradient near the walls instead of a sphere. Past the wall the
-                    // blend strength itself fades out smoothly (see heatOutsideFade below) instead
-                    // of cutting off hard, so Color2 dissolves gently into the original texture.
-                    float3 heatAxisDist = abs(inp.texcoord6.xyz - _HeatCenter.xyz) / max(_HeatSize.xyz * 0.5, 0.0001);
-                    float heatBoxDist = max(heatAxisDist.x, max(heatAxisDist.y, heatAxisDist.z));
-                    float heatEdgeStart = 0.7;
-                    float heatColorT = saturate((heatBoxDist - heatEdgeStart) / max(1.0 - heatEdgeStart, 0.0001));
-                    float3 heatColor = lerp(_HeatColor1.rgb, _HeatColor2.rgb, heatColorT);
-                    // Past the wall (heatBoxDist > 1), keep using Color2 but fade the blend AMOUNT
-                    // itself down to 0 over heatOutsideFalloff units, so Color2 dissolves smoothly
-                    // into the original texture instead of stopping dead exactly at the box wall.
-                    float heatOutsideFalloff = 0.3;
-                    float heatOutsideFade = 1.0 - saturate((heatBoxDist - 1.0) / max(heatOutsideFalloff, 0.0001));
-                    o.sv_target.xyz = lerp(o.sv_target.xyz, heatColor, _HeatBlendStrength * heatOutsideFade);
-                }
                 o.sv_target.w = 0.0;
                 return o;
 			}
@@ -750,12 +695,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
 			float3 _Temperature;
 			float _ThermalVisionOn;
 			float _HeatThermalFactor;
-			float _VisualizeHeat;
-			float _HeatBlendStrength;
-			float4 _HeatColor1;
-			float4 _HeatColor2;
-			float4 _HeatCenter;
-			float4 _HeatSize;
 			// Custom ConstantBuffers for Vertex Shader
 			// Custom ConstantBuffers for Fragment Shader
 			// Texture params for Vertex Shader
@@ -909,25 +848,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
                 tmp0.xyz = tmp3.www * tmp2.xyz;
                 tmp0.xyz = tmp0.xyz * _ReflectColor.xyz;
                 o.sv_target.xyz = tmp0.xyz * tmp0.www + tmp1.xyz;
-                if (_VisualizeHeat > 0.5) {
-                    // Box-collider-style bounds: _HeatCenter/_HeatSize define a box in object
-                    // space (_HeatSize is a full extent, like BoxCollider.size). Per-axis distance
-                    // from center, normalized so 0 = center, 1 = wall. Chebyshev (max-of-axes) gives
-                    // a box-shaped gradient near the walls instead of a sphere. Past the wall the
-                    // blend strength itself fades out smoothly (see heatOutsideFade below) instead
-                    // of cutting off hard, so Color2 dissolves gently into the original texture.
-                    float3 heatAxisDist = abs(inp.texcoord5.xyz - _HeatCenter.xyz) / max(_HeatSize.xyz * 0.5, 0.0001);
-                    float heatBoxDist = max(heatAxisDist.x, max(heatAxisDist.y, heatAxisDist.z));
-                    float heatEdgeStart = 0.7;
-                    float heatColorT = saturate((heatBoxDist - heatEdgeStart) / max(1.0 - heatEdgeStart, 0.0001));
-                    float3 heatColor = lerp(_HeatColor1.rgb, _HeatColor2.rgb, heatColorT);
-                    // Past the wall (heatBoxDist > 1), keep using Color2 but fade the blend AMOUNT
-                    // itself down to 0 over heatOutsideFalloff units, so Color2 dissolves smoothly
-                    // into the original texture instead of stopping dead exactly at the box wall.
-                    float heatOutsideFalloff = 0.3;
-                    float heatOutsideFade = 1.0 - saturate((heatBoxDist - 1.0) / max(heatOutsideFalloff, 0.0001));
-                    o.sv_target.xyz = lerp(o.sv_target.xyz, heatColor, _HeatBlendStrength * heatOutsideFade);
-                }
                 o.sv_target.w = 0.0;
                 return o;
 			}
@@ -985,13 +905,6 @@ Shader "p0/Reflective/Bumped Specular SMap" {
 			float3 _Temperature;
 			float _ThermalVisionOn;
 			float _HeatThermalFactor;
-			float _VisualizeHeat;
-			float _HeatBlendStrength;
-			float4 _HeatColor1;
-			float4 _HeatColor2;
-			float4 _HeatCenter;
-			float4 _HeatSize;
-			float _SceneLight;
 			// Custom ConstantBuffers for Vertex Shader
 			// Custom ConstantBuffers for Fragment Shader
 			// Texture params for Vertex Shader
@@ -1167,39 +1080,8 @@ Shader "p0/Reflective/Bumped Specular SMap" {
                 o.sv_target2.xyz = tmp3.xyz * float3(0.5, 0.5, 0.5) + float3(0.5, 0.5, 0.5);
                 tmp0.xyz = tmp0.yzw * tmp2.yzw;
                 tmp0.xyz = tmp1.xyz * tmp2.xxx + tmp0.xyz;
-				if (_SceneLight)
-				{
-					o.sv_target3.xyz = tmp0.xyz;
-				}
-				else
-				{
-					o.sv_target3.xyz = exp(-tmp0.xyz);
-				}
+                o.sv_target3.xyz = exp(-tmp0.xyz);
                 o.sv_target.xyz = tmp2.yzw;
-                if (_VisualizeHeat > 0.5) {
-                    // Blended into the emission channel (RT3), not the diffuse albedo (RT0),
-                    // so the heat gradient stays visible regardless of per-pixel direct light -
-                    // matching how it behaves in the forward-rendered passes, where the blend
-                    // happens after lighting is already resolved into the final color.
-                    //
-                    // Box-collider-style bounds: _HeatCenter/_HeatSize define a box in object
-                    // space (_HeatSize is a full extent, like BoxCollider.size). Per-axis distance
-                    // from center, normalized so 0 = center, 1 = wall. Chebyshev (max-of-axes) gives
-                    // a box-shaped gradient near the walls instead of a sphere. Past the wall the
-                    // blend strength itself fades out smoothly (see heatOutsideFade below) instead
-                    // of cutting off hard, so Color2 dissolves gently into the original texture.
-                    float3 heatAxisDist = abs(inp.texcoord5.xyz - _HeatCenter.xyz) / max(_HeatSize.xyz * 0.5, 0.0001);
-                    float heatBoxDist = max(heatAxisDist.x, max(heatAxisDist.y, heatAxisDist.z));
-                    float heatEdgeStart = 0.7;
-                    float heatColorT = saturate((heatBoxDist - heatEdgeStart) / max(1.0 - heatEdgeStart, 0.0001));
-                    float3 heatColor = lerp(_HeatColor1.rgb, _HeatColor2.rgb, heatColorT);
-                    // Past the wall (heatBoxDist > 1), keep using Color2 but fade the blend AMOUNT
-                    // itself down to 0 over heatOutsideFalloff units, so Color2 dissolves smoothly
-                    // into the original texture instead of stopping dead exactly at the box wall.
-                    float heatOutsideFalloff = 0.3;
-                    float heatOutsideFade = 1.0 - saturate((heatBoxDist - 1.0) / max(heatOutsideFalloff, 0.0001));
-                    o.sv_target3.xyz = lerp(o.sv_target3.xyz, heatColor, _HeatBlendStrength * heatOutsideFade);
-                }
                 o.sv_target.w = 1.0;
                 o.sv_target2.w = 1.0;
                 o.sv_target3.w = 1.0;
@@ -1276,5 +1158,5 @@ Shader "p0/Reflective/Bumped Specular SMap" {
 		}
 	}
 	Fallback "Reflective/Bumped Diffuse"
-	CustomEditor "Editor.BumpedSpecularSMapWindow.SpecularSMapSMapEditor"
+	CustomEditor "FresnelMaterialEditor"
 }
